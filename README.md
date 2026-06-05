@@ -126,4 +126,4 @@ Approximately 6–8 hours total: 1 hour planning and reading docs, 4 hours codin
 
 ## Author
 
-Built by [Your Name] for the Better Call Centers AI Automation Developer Internship practical test.
+Built by Malav Radia for the Better Call Centers AI Automation Developer Internship practical test.
