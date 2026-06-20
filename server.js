@@ -70,6 +70,7 @@ app.post('/api/appointments', async(req, res) => {
                 appt_time: appt_time,
                 notes: notes || null,
                 message_status: 'pending',
+                status: 'pending',
                 created_at: new Date().toISOString(),
             }])
             .select()
@@ -117,6 +118,70 @@ app.post('/api/appointments', async(req, res) => {
     } catch (err) {
         console.error('[DB ERROR]', err);
         return res.status(500).json({ error: err.message });
+    }
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// POST /webhook/whatsapp — Receives incoming WhatsApp replies from Twilio
+// ────────────────────────────────────────────────────────────────────────────
+app.post('/webhook/whatsapp', express.urlencoded({ extended: false }), async(req, res) => {
+    const fromNumber = req.body.From || ''; // e.g. "whatsapp:+919023538442"
+    const messageBody = (req.body.Body || '').trim().toUpperCase();
+
+    console.log(`[WEBHOOK] Incoming from ${fromNumber}: "${messageBody}"`);
+
+    // Strip "whatsapp:" prefix to match how numbers are stored in Supabase
+    const cleanPhone = fromNumber.replace('whatsapp:', '');
+
+    try {
+        // Find the most recent pending appointment for this phone number
+        const { data: appointments, error } = await supabase
+            .from('appointments')
+            .select('*')
+            .eq('phone', cleanPhone)
+            .eq('status', 'pending')
+            .order('appt_time', { ascending: true })
+            .limit(1);
+
+        if (error) throw error;
+
+        if (!appointments || appointments.length === 0) {
+            console.log(`[WEBHOOK] No pending appointment found for ${cleanPhone}`);
+            res.set('Content-Type', 'text/xml');
+            return res.send('<Response></Response>');
+        }
+
+        const appt = appointments[0];
+        let newStatus = null;
+
+        if (messageBody.includes('CONFIRM')) {
+            newStatus = 'confirmed';
+        } else if (messageBody.includes('CANCEL')) {
+            newStatus = 'cancelled';
+        }
+
+        if (newStatus) {
+            await supabase
+                .from('appointments')
+                .update({
+                    status: newStatus,
+                    customer_replied_at: new Date().toISOString()
+                })
+                .eq('id', appt.id);
+
+            console.log(`[WEBHOOK] Updated appointment ${appt.id} → ${newStatus}`);
+        } else {
+            console.log(`[WEBHOOK] Unrecognized reply: "${messageBody}" — no status change`);
+        }
+
+        // Twilio expects a TwiML response (even if empty)
+        res.set('Content-Type', 'text/xml');
+        return res.send('<Response></Response>');
+
+    } catch (err) {
+        console.error('[WEBHOOK ERROR]', err);
+        res.set('Content-Type', 'text/xml');
+        return res.send('<Response></Response>');
     }
 });
 
@@ -203,10 +268,6 @@ app.get('/api/appointments', async(req, res) => {
     }
 });
 
-// ────────────────────────────────────────────────────────────────────────────
-// BONUS: Cron job — every minute, check for appointments within 1 hour
-// and send a reminder if not already reminded
-// ────────────────────────────────────────────────────────────────────────────
 // ────────────────────────────────────────────────────────────────────────────
 // CRON: Multi-stage reminders — 24hr, 1hr, and 30-min no-reply escalation
 // Runs every minute, checking three separate conditions each time
@@ -328,5 +389,6 @@ app.listen(PORT, () => {
     console.log(`\n✅ Appointment Reminder Server running at http://localhost:${PORT}`);
     console.log(`   Dashboard: http://localhost:${PORT}/index.html`);
     console.log(`   API:       http://localhost:${PORT}/api/appointments`);
-    console.log(`   Reminder cron: checking every minute for upcoming appointments\n`);
+    console.log(`   Webhook:   http://localhost:${PORT}/webhook/whatsapp`);
+    console.log(`   Reminder cron: checking every minute for 24h/1h reminders + escalations\n`);
 });
