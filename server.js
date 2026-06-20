@@ -207,36 +207,118 @@ app.get('/api/appointments', async(req, res) => {
 // BONUS: Cron job — every minute, check for appointments within 1 hour
 // and send a reminder if not already reminded
 // ────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
+// CRON: Multi-stage reminders — 24hr, 1hr, and 30-min no-reply escalation
+// Runs every minute, checking three separate conditions each time
+// ────────────────────────────────────────────────────────────────────────────
 cron.schedule('* * * * *', async() => {
     const now = new Date();
+
+    // ── CHECK A: 24-hour reminder ──────────────────────────────────────────
+    const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    const in25h = new Date(now.getTime() + 25 * 60 * 60 * 1000);
+
+    try {
+        const { data: due24h, error: err24h } = await supabase
+            .from('appointments')
+            .select('*')
+            .gte('appt_time', in24h.toISOString())
+            .lte('appt_time', in25h.toISOString())
+            .is('reminder_24h_sent', null)
+            .neq('status', 'cancelled');
+
+        if (err24h) throw err24h;
+
+        for (const appt of due24h || []) {
+            const dateStr = new Date(appt.appt_time).toLocaleString('en-IN', {
+                weekday: 'long',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            const msg = `Hi ${appt.customer_name}! Just a reminder — your appointment is tomorrow, ${dateStr}. Reply CONFIRM to confirm or CANCEL to cancel. — Better Call Centers`;
+
+            try {
+                await sendMessage(appt.phone, msg);
+                await supabase.from('appointments')
+                    .update({ reminder_24h_sent: new Date().toISOString() })
+                    .eq('id', appt.id);
+                console.log(`[24H REMINDER SENT] → ${appt.customer_name}`);
+            } catch (err) {
+                console.error(`[24H REMINDER FAIL] ${appt.customer_name}: ${err.message}`);
+            }
+        }
+    } catch (err) {
+        console.error('[24H CRON ERROR]', err.message);
+    }
+
+    // ── CHECK B: 1-hour reminder ───────────────────────────────────────────
     const oneHour = new Date(now.getTime() + 60 * 60 * 1000);
 
-    const { data: upcoming, error } = await supabase
-        .from('appointments')
-        .select('*')
-        .gte('appt_time', now.toISOString())
-        .lte('appt_time', oneHour.toISOString())
-        .is('reminder_sent', null); // Only those not yet reminded
+    try {
+        const { data: due1h, error: err1h } = await supabase
+            .from('appointments')
+            .select('*')
+            .gte('appt_time', now.toISOString())
+            .lte('appt_time', oneHour.toISOString())
+            .is('reminder_1h_sent', null)
+            .neq('status', 'cancelled');
 
-    if (error) { console.error('[CRON ERROR]', error.message); return; }
+        if (err1h) throw err1h;
 
-    for (const appt of upcoming) {
-        const dateStr = new Date(appt.appt_time).toLocaleString('en-IN', {
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-        const reminderMsg = `⏰ Reminder: Hi ${appt.customer_name}, your appointment is in less than 1 hour at ${dateStr}. See you soon! — Better Call Centers`;
+        for (const appt of due1h || []) {
+            const dateStr = new Date(appt.appt_time).toLocaleString('en-IN', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            const msg = `⏰ Reminder: Hi ${appt.customer_name}, your appointment is in less than 1 hour at ${dateStr}. See you soon! — Better Call Centers`;
 
-        try {
-            await sendMessage(appt.phone, reminderMsg);
-            await supabase
-                .from('appointments')
-                .update({ reminder_sent: new Date().toISOString() })
-                .eq('id', appt.id);
-            console.log(`[REMINDER SENT] → ${appt.customer_name} (${appt.phone})`);
-        } catch (err) {
-            console.error(`[REMINDER FAIL] ${appt.customer_name}: ${err.message}`);
+            try {
+                await sendMessage(appt.phone, msg);
+                await supabase.from('appointments')
+                    .update({ reminder_1h_sent: new Date().toISOString() })
+                    .eq('id', appt.id);
+                console.log(`[1H REMINDER SENT] → ${appt.customer_name}`);
+            } catch (err) {
+                console.error(`[1H REMINDER FAIL] ${appt.customer_name}: ${err.message}`);
+            }
         }
+    } catch (err) {
+        console.error('[1H CRON ERROR]', err.message);
+    }
+
+    // ── CHECK C: 30-minute no-reply escalation ─────────────────────────────
+    const thirtyMinAgo = new Date(now.getTime() - 30 * 60 * 1000);
+
+    try {
+        const { data: needsEscalation, error: errEsc } = await supabase
+            .from('appointments')
+            .select('*')
+            .not('reminder_1h_sent', 'is', null)
+            .lte('reminder_1h_sent', thirtyMinAgo.toISOString())
+            .is('escalation_sent', null)
+            .eq('status', 'pending'); // only escalate if customer never confirmed/cancelled
+
+        if (errEsc) throw errEsc;
+
+        for (const appt of needsEscalation || []) {
+            console.log(`[ESCALATION] ${appt.customer_name} (${appt.phone}) has not responded 30 min after reminder.`);
+
+            // In production, this would alert a manager via WhatsApp/email/Slack.
+            // For now we log it and mark the appointment as no_response.
+            try {
+                await supabase.from('appointments')
+                    .update({
+                        escalation_sent: new Date().toISOString(),
+                        status: 'no_response'
+                    })
+                    .eq('id', appt.id);
+                console.log(`[ESCALATION RECORDED] → ${appt.customer_name}`);
+            } catch (err) {
+                console.error(`[ESCALATION FAIL] ${appt.customer_name}: ${err.message}`);
+            }
+        }
+    } catch (err) {
+        console.error('[ESCALATION CRON ERROR]', err.message);
     }
 });
 
