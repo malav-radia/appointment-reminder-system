@@ -1,17 +1,52 @@
-# Appointment Reminder System
-### Built for: Better Call Centers Practical Test
+# 📅 Appointment Reminder System
 
-A complete WhatsApp/SMS appointment reminder system with a booking form, live database, automatic messaging, and a real-time dashboard.
+A full-stack WhatsApp appointment management system with two-way conversation handling, multi-stage automated reminders, and a live operations dashboard — built end-to-end with Node.js, Supabase, and Twilio.
+
+**🔗 Live demo:** [appointment-reminder-system.onrender.com](https://appointment-reminder-system.onrender.com)
+*(Free tier — first load may take 30-50 seconds to wake up)*
 
 ---
 
-## What This App Does
+## What it does
 
-1. **Booking form** — Enter a customer name, phone number, appointment time, and notes.
-2. **Database save** — Every appointment is saved to Supabase (PostgreSQL) in real time.
-3. **Confirmation message** — The moment the form is submitted, Twilio sends an SMS or WhatsApp message to the customer confirming their appointment.
-4. **Live dashboard** — Shows all appointments pulled live from the database, auto-refreshing every 30 seconds.
-5. **BONUS: Automatic reminder** — A background cron job runs every minute and sends a reminder message to any customer whose appointment is within the next hour (only once per appointment).
+This isn't just a "send a message" demo — it's a closed-loop system where the database, messaging, and dashboard all stay in sync automatically:
+
+- 📝 **Book appointments** through a simple web form
+- 💬 **Instant WhatsApp confirmation** sent via Twilio the moment a booking is made
+- 🔄 **Two-way conversation** — when a customer replies `CONFIRM` or `CANCEL` on WhatsApp, the system listens via webhook and updates the database in real time
+- ⏰ **Multi-stage reminders** — automatic reminders sent 24 hours and 1 hour before the appointment
+- 🚨 **No-response escalation** — if a customer doesn't reply within 30 minutes of the 1-hour reminder, the appointment is automatically flagged as `no_response`
+- 📊 **Live dashboard** — search, filter by status, edit, or cancel appointments — all reading live from the database, sorted by priority (confirmed → pending → no response → cancelled)
+- ✏️ **Full CRUD** — create, read, update, and cancel appointments directly from the dashboard
+
+---
+
+## Architecture
+
+```
+┌──────────────┐         ┌─────────────────┐         ┌──────────────┐
+│   Browser    │ ──────► │  Node.js/Express │ ──────► │   Supabase   │
+│  (Frontend)  │ ◄────── │     Backend      │ ◄────── │ (PostgreSQL) │
+└──────────────┘         └─────────────────┘         └──────────────┘
+                                  │      ▲
+                                  ▼      │
+                          ┌──────────────────┐
+                          │   Twilio API     │
+                          │  (WhatsApp/SMS)  │
+                          └──────────────────┘
+                                  │      ▲
+                                  ▼      │
+                          ┌──────────────────┐
+                          │  Customer's      │
+                          │   WhatsApp       │
+                          └──────────────────┘
+```
+
+**The full message loop:**
+1. Customer books → saved to Supabase → confirmation sent via Twilio
+2. Customer replies `CONFIRM`/`CANCEL` on WhatsApp → Twilio forwards it to `/webhook/whatsapp` → status updated in Supabase
+3. A cron job runs every minute, checking three independent conditions: 24h reminder due, 1h reminder due, or 30-min escalation due
+4. Dashboard polls the database every 30 seconds and re-renders — always showing live state, never stale or hardcoded data
 
 ---
 
@@ -19,111 +54,89 @@ A complete WhatsApp/SMS appointment reminder system with a booking form, live da
 
 | Layer | Tool | Why |
 |---|---|---|
-| Frontend | Plain HTML + JavaScript | Simple, fast, no build step |
-| Backend | Node.js + Express | Lightweight API server |
-| Database | Supabase (PostgreSQL) | Free tier, real-time, reliable |
-| Messaging | Twilio SMS or WhatsApp sandbox | Free trial, easy API |
-| Scheduling | node-cron | Runs reminder check every minute |
+| Frontend | Plain HTML + JavaScript | No build step, fast to iterate |
+| Backend | Node.js + Express | Lightweight, handles persistent cron jobs (unlike serverless) |
+| Database | Supabase (PostgreSQL) | Free tier, hosted, real REST API out of the box |
+| Messaging | Twilio WhatsApp API | Industry standard, supports both sending and receiving |
+| Scheduling | node-cron | Runs reminder/escalation checks every minute |
+| Hosting | Render | Free tier supports long-running Node processes (Vercel/serverless can't run persistent cron jobs) |
 
 ---
 
-## Setup Instructions (Step by Step)
+## Database Schema
 
-### Step 1 — Set up Supabase
+`appointments` table:
 
-1. Go to [supabase.com](https://supabase.com) → Sign up free → Create a new project.
-2. Go to **Table Editor** → Click **New Table** → Name it `appointments`.
-3. Add these columns:
-
-| Column name | Type | Notes |
+| Column | Type | Purpose |
 |---|---|---|
-| id | int8 | Primary key, auto-increment |
-| customer_name | text | |
-| phone | text | |
-| appt_time | timestamptz | |
-| notes | text | Nullable |
-| message_status | text | Default: 'pending' |
-| message_sid | text | Nullable |
-| reminder_sent | timestamptz | Nullable |
-| created_at | timestamptz | Default: now() |
-
-4. Go to **Settings → API** → Copy your **Project URL** and **anon public** key.
-
----
-
-### Step 2 — Set up Twilio
-
-1. Go to [twilio.com](https://twilio.com) → Sign up for free trial.
-2. From the dashboard, copy your **Account SID** and **Auth Token**.
-3. Get a free Twilio phone number (for SMS).
-4. **For WhatsApp:** Go to Console → Messaging → Try it Out → Send a WhatsApp Message → Follow the sandbox instructions. Set `USE_WHATSAPP=true` in your `.env`.
+| `id` | int8 (identity) | Primary key |
+| `customer_name` | text | Customer's name |
+| `phone` | text | WhatsApp/SMS number |
+| `appt_time` | timestamptz | Scheduled appointment time |
+| `notes` | text | Optional notes |
+| `status` | text | `pending` / `confirmed` / `cancelled` / `no_response` |
+| `message_status` | text | Whether the initial confirmation message sent successfully |
+| `message_sid` | text | Twilio message ID for tracking |
+| `reminder_24h_sent` | timestamptz | When the 24-hour reminder was sent |
+| `reminder_1h_sent` | timestamptz | When the 1-hour reminder was sent |
+| `escalation_sent` | timestamptz | When the no-reply escalation triggered |
+| `customer_replied_at` | timestamptz | When the customer's reply was received |
+| `created_at` | timestamptz | Record creation time |
 
 ---
 
-### Step 3 — Configure the project
+## Setup Instructions
 
-1. Copy `.env.example` to a new file called `.env`:
+### 1. Supabase
+1. Create a free project at [supabase.com](https://supabase.com)
+2. Create the `appointments` table with the schema above
+3. Copy your Project URL and anon public key from **Settings → API**
+
+### 2. Twilio
+1. Sign up free at [twilio.com](https://twilio.com)
+2. Activate the WhatsApp Sandbox (**Messaging → Try it Out → WhatsApp**)
+3. Copy your Account SID and Auth Token
+4. Set the sandbox's **"When a message comes in"** webhook to:
    ```
-   cp .env.example .env
+   https://your-deployed-url.onrender.com/webhook/whatsapp
    ```
-2. Open `.env` and fill in your Supabase URL, Supabase key, Twilio SID, Twilio token, and Twilio phone number.
 
-3. Open `config.js` and update `BACKEND_URL` to `http://localhost:3000` for local development.
+### 3. Environment Variables
+Copy `.env.example` to `.env` and fill in:
+```
+SUPABASE_URL=
+SUPABASE_KEY=
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_FROM_NUMBER=
+USE_WHATSAPP=true
+PORT=3000
+```
 
----
-
-### Step 4 — Install and run
-
+### 4. Run locally
 ```bash
 npm install
 npm start
 ```
+Open `http://localhost:3000`
 
-Open your browser at: **http://localhost:3000**
-
----
-
-## How the Data Flows
-
-```
-User fills form
-      ↓
-POST /api/appointments (Express server)
-      ↓
-Save to Supabase → appointments table
-      ↓
-Twilio API call → SMS/WhatsApp sent to customer
-      ↓
-Supabase updated: message_status = 'sent'
-      ↓
-Dashboard (GET /api/appointments) reads live from Supabase
-      ↓
-Auto-refresh every 30 seconds
-
-BONUS (background):
-node-cron runs every 60 seconds
-      ↓
-Query Supabase: appointments in next 60 min where reminder_sent IS NULL
-      ↓
-Send reminder via Twilio
-      ↓
-Update reminder_sent timestamp in Supabase
-```
+### 5. Deploy
+Deployed on [Render](https://render.com) as a free Web Service:
+- Build command: `npm install`
+- Start command: `node server.js`
+- Environment variables added in Render's dashboard
 
 ---
 
-## Hardest Part Solved
+## What I'd build next
 
-The trickiest part was handling the case where the database save succeeds but the Twilio message fails (e.g., invalid phone number, API error). Rather than rolling back the entire transaction or crashing, the server logs the messaging error but still returns a 200 response with `message_status: 'send_failed'` — so the appointment is always saved, and the status is honest. The dashboard can show this state clearly so the team knows to follow up manually.
-
----
-
-## Time Taken
-
-Approximately 6–8 hours total: 1 hour planning and reading docs, 4 hours coding and testing, 1–2 hours debugging Twilio sandbox setup and Supabase table configuration.
+- Replace the polling dashboard with Supabase real-time subscriptions (WebSocket-based, no 30-second delay)
+- Add authentication so the dashboard isn't publicly accessible
+- Move from Twilio's shared WhatsApp sandbox to a verified business number for production use
+- Use a proper job queue (Bull/Redis) instead of a blanket every-minute cron once appointment volume grows
 
 ---
 
 ## Author
 
-Built by Malav Radia for the Better Call Centers AI Automation Developer Internship practical test.
+Built by Malav Radia — [GitHub](https://github.com/malav-radia)
