@@ -103,7 +103,25 @@ function applyFilters() {
         filtered = filtered.filter(appt => (appt.status || 'pending') === statusValue);
     }
 
+    filtered = sortAppointments(filtered);
     renderTable(filtered);
+}
+
+// ---- SORT: Confirmed first, then Pending, then No Response, Cancelled last ----
+function sortAppointments(list) {
+    const statusOrder = { confirmed: 0, pending: 1, no_response: 2, cancelled: 3 };
+
+    return [...list].sort((a, b) => {
+        const statusA = a.status || 'pending';
+        const statusB = b.status || 'pending';
+        const rankA = statusOrder[statusA] !== undefined ? statusOrder[statusA] : 1;
+        const rankB = statusOrder[statusB] !== undefined ? statusOrder[statusB] : 1;
+
+        if (rankA !== rankB) return rankA - rankB;
+
+        // Within same status, soonest appointment first
+        return new Date(a.appt_time) - new Date(b.appt_time);
+    });
 }
 
 function renderTable(appointments) {
