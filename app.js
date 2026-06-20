@@ -158,10 +158,14 @@ function renderTable(appointments) {
         <td>${escHtml(appt.phone)}</td>
         <td>${dateStr}</td>
         <td><span class="status ${statusClass}">${statusLabel}</span></td>
+        <td>
+          <button class="action-btn edit-btn" onclick="openEditModal(${appt.id})">Edit</button>
+          <button class="action-btn cancel-btn" onclick="cancelAppointment(${appt.id})">Cancel</button>
+        </td>
       </tr>`;
-  }).join('');
+    }).join('');
 
-  container.innerHTML = `
+    container.innerHTML = `
     <table>
       <thead>
         <tr>
@@ -169,6 +173,7 @@ function renderTable(appointments) {
           <th>Phone</th>
           <th>Appointment Time</th>
           <th>Status</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -176,9 +181,85 @@ function renderTable(appointments) {
 }
 
 function escHtml(str) {
-  const d = document.createElement('div');
-  d.textContent = str || '';
-  return d.innerHTML;
+    const d = document.createElement('div');
+    d.textContent = str || '';
+    return d.innerHTML;
+}
+
+// ---- EDIT APPOINTMENT ----
+function openEditModal(id) {
+    const appt = allAppointments.find(a => a.id === id);
+    if (!appt) return;
+
+    document.getElementById('editId').value = appt.id;
+    document.getElementById('editName').value = appt.customer_name;
+    document.getElementById('editPhone').value = appt.phone;
+    document.getElementById('editNotes').value = appt.notes || '';
+
+    // Convert ISO time to datetime-local format
+    const localDateTime = new Date(appt.appt_time);
+    const offset = localDateTime.getTimezoneOffset();
+    const adjusted = new Date(localDateTime.getTime() - offset * 60000);
+    document.getElementById('editApptTime').value = adjusted.toISOString().slice(0, 16);
+
+    document.getElementById('editModal').style.display = 'flex';
+}
+
+function closeEditModal() {
+    document.getElementById('editModal').style.display = 'none';
+}
+
+async function saveEdit() {
+    const id = document.getElementById('editId').value;
+    const name = document.getElementById('editName').value.trim();
+    const phone = document.getElementById('editPhone').value.trim();
+    const appt_time = document.getElementById('editApptTime').value;
+    const notes = document.getElementById('editNotes').value.trim();
+
+    if (!name || !phone || !appt_time) {
+        alert('Please fill in all required fields.');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/appointments/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, phone, appt_time, notes })
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || 'Failed to update');
+        }
+
+        closeEditModal();
+        loadAppointments();
+
+    } catch (err) {
+        alert(`Error updating appointment: ${err.message}`);
+    }
+}
+
+// ---- CANCEL APPOINTMENT ----
+async function cancelAppointment(id) {
+    if (!confirm('Cancel this appointment? The customer will be notified.')) return;
+
+    try {
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/appointments/${id}/cancel`, {
+            method: 'PATCH',
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || 'Failed to cancel');
+        }
+
+        loadAppointments();
+
+    } catch (err) {
+        alert(`Error cancelling appointment: ${err.message}`);
+    }
 }
 
 // ---- AUTO-REFRESH EVERY 30 SECONDS ----
