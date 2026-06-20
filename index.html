@@ -32,6 +32,21 @@
             font-weight: 600;
         }
         
+        .status-confirmed {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        
+        .status-cancelled {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .status-no_response {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
         .topbar .badge {
             background: #25D366;
             color: white;
@@ -283,6 +298,105 @@
             color: #a0aec0;
             padding: 32px;
         }
+        
+        .action-btn {
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            margin-right: 4px;
+        }
+        
+        .edit-btn {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .edit-btn:hover {
+            background: #bfdbfe;
+        }
+        
+        .cancel-btn {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .cancel-btn:hover {
+            background: #fecaca;
+        }
+        
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal-box {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            width: 380px;
+            max-width: 90%;
+        }
+        
+        .modal-box h2 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #1F3864;
+            margin-bottom: 16px;
+        }
+        
+        .modal-box label {
+            margin-top: 14px;
+        }
+        
+        .modal-box label:first-of-type {
+            margin-top: 0;
+        }
+        
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 18px;
+        }
+        
+        .modal-btn-cancel {
+            flex: 1;
+            padding: 10px;
+            background: #e2e8f0;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        
+        .modal-btn-cancel:hover {
+            background: #cbd5e0;
+        }
+        
+        .modal-btn-save {
+            flex: 1;
+            padding: 10px;
+            background: #1F3864;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        
+        .modal-btn-save:hover {
+            background: #2d4a8a;
+        }
     </style>
 </head>
 
@@ -336,16 +450,36 @@
                 <div style="padding: 14px 24px; border-bottom: 1px solid #e2e8f0; display: flex; gap: 10px;">
                     <input type="text" id="searchBox" placeholder="Search name or phone..." oninput="applyFilters()" style="flex: 1; padding: 8px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 0.85rem;">
                     <select id="statusFilter" onchange="applyFilters()" style="padding: 8px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 0.85rem;">
-    <option value="all">All Status</option>
-    <option value="pending">Pending</option>
-    <option value="confirmed">Confirmed</option>
-    <option value="cancelled">Cancelled</option>
-    <option value="no_response">No Response</option>
-  </select>
+                        <option value="all">All Status</option>
+                        <option value="pending">Pending</option>
+                        <option value="confirmed">Confirmed</option>
+                        <option value="cancelled">Cancelled</option>
+                        <option value="no_response">No Response</option>
+                    </select>
                 </div>
                 <div id="tableContainer">
                     <div class="loader">Loading appointments...</div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- EDIT MODAL -->
+    <div id="editModal" class="modal-overlay">
+        <div class="modal-box">
+            <h2>Edit Appointment</h2>
+            <input type="hidden" id="editId">
+            <label>Customer Name</label>
+            <input type="text" id="editName">
+            <label>Phone Number</label>
+            <input type="text" id="editPhone">
+            <label>Appointment Time</label>
+            <input type="datetime-local" id="editApptTime">
+            <label>Notes</label>
+            <input type="text" id="editNotes">
+            <div class="modal-actions">
+                <button class="modal-btn-cancel" onclick="closeEditModal()">Cancel</button>
+                <button class="modal-btn-save" onclick="saveEdit()">Save Changes</button>
             </div>
         </div>
     </div>
